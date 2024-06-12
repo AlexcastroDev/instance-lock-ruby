@@ -65,7 +65,7 @@ class Book < ActiveRecord::Base
   belongs_to :author
 
   counter_culture :author,
-    # execute_after_commit: true,
+    execute_after_commit: true,
     column_name: -> (b) { "books_#{b.status}_count" },
     column_names: -> {
       {
