@@ -46,6 +46,7 @@ ActiveRecord::Schema.define do
   create_table :books, id: :serial, force: true do |t|
     t.string :title
     t.integer :status, default: 0
+    t.string :color, null: true
 
     t.belongs_to :author, index: true
   end
@@ -57,6 +58,8 @@ class CreateBookWorker
   def perform(id)
     author = Author.find(id)
     author.books.create!(title: "Book 2", status: :published)
+    book = author.books.last
+    book.update_color
   end
 end
 
@@ -82,6 +85,11 @@ class Book < ActiveRecord::Base
     self.author.with_lock do
       self.author.update!(name: "New Name")
     end
+  end
+
+  def update_color
+    self.color = "red"
+    self.save!
   end
 end
 
