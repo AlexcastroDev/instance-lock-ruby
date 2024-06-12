@@ -51,12 +51,12 @@ ActiveRecord::Schema.define do
   end
 end
 
-class UpdateNameJobWorker
+class CreateBookWorker
   include Sidekiq::Worker
 
   def perform(id)
-    book = Book.find(id)
-    book.update_name
+    author = Author.find(id)
+    author.books.create!(title: "Book 2", status: :published)
   end
 end
 
@@ -65,7 +65,7 @@ class Book < ActiveRecord::Base
   belongs_to :author
 
   counter_culture :author,
-    execute_after_commit: true,
+    # execute_after_commit: true,
     column_name: -> (b) { "books_#{b.status}_count" },
     column_names: -> {
       {
@@ -76,11 +76,7 @@ class Book < ActiveRecord::Base
 
   enum status: { pending: 0, published: 1 }
 
-  after_commit :update_name_job, on: :create
-
-  def update_name_job
-    UpdateNameJobWorker.perform_async(self.id)
-  end
+  after_commit :update_name, on: :create
 
   def update_name
     self.author.with_lock do
@@ -91,25 +87,20 @@ end
 
 class Author < ActiveRecord::Base
   has_many :books
+
+  def create_book
+    CreateBookWorker.perform_async(self.id)
+  end
 end
 
 class BugTest < Minitest::Test
-  def test_create_book
+  def test_bug_locking_a_record_with_unpersisted
     author = Author.create!(name: "John")
-    book = author.books.create!(title: "Book 1", status: :pending)
-    puts author.inspect
-    puts book.inspect
+    author.create_book
 
-    author.reload
-
-    assert_equal 1, author.books_pending_count
-    assert_equal 0, author.books_published_count
-
-    # Workers
-    assert_equal 1, Sidekiq::Worker.jobs.size
     Sidekiq::Worker.drain_all
 
     author.reload
-    assert_equal "New Name", author.name
+    assert_equal 1, author.books_published_count
   end
 end
