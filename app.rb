@@ -13,12 +13,14 @@ gemfile(true) do
   gem "pg"
   gem "counter_culture"
   gem "after_commit_action"
+  gem 'sidekiq'
 end
 
 require "active_record"
 require "minitest/autorun"
 require "logger"
-
+require 'sidekiq/api'
+require 'sidekiq/testing'
 # This connection will do for database-independent bug reports.
 # ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
 ActiveRecord::Base.establish_connection(
@@ -49,6 +51,15 @@ ActiveRecord::Schema.define do
   end
 end
 
+class UpdateNameJobWorker
+  include Sidekiq::Worker
+
+  def perform(id)
+    book = Book.find(id)
+    book.update_name
+  end
+end
+
 
 class Book < ActiveRecord::Base
   belongs_to :author
@@ -64,6 +75,18 @@ class Book < ActiveRecord::Base
     }
 
   enum status: { pending: 0, published: 1 }
+
+  after_commit :update_name_job, on: :create
+
+  def update_name_job
+    UpdateNameJobWorker.perform_async(self.id)
+  end
+
+  def update_name
+    self.author.with_lock do
+      self.author.update!(name: "New Name")
+    end
+  end
 end
 
 class Author < ActiveRecord::Base
@@ -81,5 +104,12 @@ class BugTest < Minitest::Test
 
     assert_equal 1, author.books_pending_count
     assert_equal 0, author.books_published_count
+
+    # Workers
+    assert_equal 1, Sidekiq::Worker.jobs.size
+    Sidekiq::Worker.drain_all
+
+    author.reload
+    assert_equal "New Name", author.name
   end
 end
