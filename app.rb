@@ -41,12 +41,14 @@ ActiveRecord::Schema.define do
 
     t.integer :books_pending_count, default: 0
     t.integer :books_published_count, default: 0
+    t.integer :books_pending_total_cents, default: 0
+    t.integer :books_published_total_cents, default: 0
   end
 
   create_table :books, id: :serial, force: true do |t|
     t.string :title
     t.integer :status, default: 0
-    t.string :color, null: true
+    t.integer :price_cents, default: 0
 
     t.belongs_to :author, index: true
   end
@@ -57,9 +59,7 @@ class CreateBookWorker
 
   def perform(id)
     author = Author.find(id)
-    author.books.create!(title: "Book 2", status: :published)
-    book = author.books.last
-    book.update_color
+    author.books.create!(title: "Book 2", status: [0, 1].sample, price_cents: rand(1000..10000))
   end
 end
 
@@ -68,12 +68,22 @@ class Book < ActiveRecord::Base
   belongs_to :author
 
   counter_culture :author,
-    execute_after_commit: true,
+    # execute_after_commit: true,
     column_name: -> (b) { "books_#{b.status}_count" },
     column_names: -> {
       {
         Book.pending => :books_pending_count,
         Book.published => :books_published_count,
+      }
+    }
+
+  counter_culture :author,
+    # execute_after_commit: true,
+    column_name: -> (b) { "books_#{b.status}_total_cents" },
+    column_names: -> {
+      {
+        Book.pending => :books_pending_total_cents,
+        Book.published => :books_published_total_cents,
       }
     }
 
@@ -83,13 +93,8 @@ class Book < ActiveRecord::Base
 
   def update_name
     self.author.with_lock do
-      self.author.update!(name: "New Name")
+      #
     end
-  end
-
-  def update_color
-    self.color = "red"
-    self.save!
   end
 end
 
@@ -103,12 +108,9 @@ end
 
 class BugTest < Minitest::Test
   def test_bug_locking_a_record_with_unpersisted
-    author = Author.create!(name: "John")
-    author.create_book
-
-    Sidekiq::Worker.drain_all
-
-    author.reload
-    assert_equal 1, author.books_published_count
+    Sidekiq::Testing.inline! do
+      author = Author.create!(name: "John")
+      author.create_book
+    end
   end
 end
